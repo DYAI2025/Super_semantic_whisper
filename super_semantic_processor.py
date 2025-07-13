@@ -60,8 +60,8 @@ class EmotionalArc:
 
 class SuperSemanticProcessor:
     """Der Hauptprozessor für die semantische Integration"""
-    
-    def __init__(self):
+
+    def __init__(self, marker_yaml_path: Optional[str] = None, marker_set: Optional[str] = None):
         self.messages: Dict[str, SemanticMessage] = {}
         self.relationships: List[SemanticRelationship] = []
         self.emotional_arc: Optional[EmotionalArc] = None
@@ -69,6 +69,9 @@ class SuperSemanticProcessor:
         self.marker_system = None
         self.cosd_analyzer = None
         self.semantic_grabbers = {}
+        self.custom_markers: Dict[str, List[str]] = {}
+        self.marker_yaml_path = marker_yaml_path
+        self.marker_set = marker_set
         self._initialize_components()
         
     def _initialize_components(self):
@@ -79,6 +82,8 @@ class SuperSemanticProcessor:
         try:
             from frausar_gui import FRAUSARAssistant
             marker_path = Path("../ALL_SEMANTIC_MARKER_TXT")
+            if self.marker_set:
+                marker_path = marker_path / self.marker_set
             self.marker_system = FRAUSARAssistant(str(marker_path))
             logger.info("✅ FRAUSAR Marker-System geladen")
         except Exception as e:
@@ -94,6 +99,9 @@ class SuperSemanticProcessor:
             
         # 3. Lade Semantic Grabbers
         self._load_semantic_grabbers()
+
+        # 4. Lade benutzerdefinierte Marker aus YAML, falls vorhanden
+        self._load_custom_markers(self.marker_yaml_path)
         
     def _load_semantic_grabbers(self):
         """Lade Semantic Grabber Library"""
@@ -105,6 +113,22 @@ class SuperSemanticProcessor:
                 logger.info(f"✅ {len(self.semantic_grabbers)} Semantic Grabbers geladen")
         else:
             logger.warning("⚠️ Semantic Grabber Library nicht gefunden")
+
+    def _load_custom_markers(self, yaml_path: Optional[str]):
+        """Lade benutzerdefinierte Marker aus einer YAML-Datei"""
+        if not yaml_path:
+            return
+        path = Path(yaml_path)
+        if not path.exists():
+            logger.warning(f"⚠️ Marker YAML nicht gefunden: {yaml_path}")
+            return
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = yaml.safe_load(f) or {}
+                self.custom_markers = data.get('markers', {})
+                logger.info(f"✅ {len(self.custom_markers)} benutzerdefinierte Marker geladen")
+        except Exception as e:
+            logger.error(f"Fehler beim Laden benutzerdefinierter Marker: {e}")
     
     def process_whatsapp_export(self, export_file: Path) -> Dict[str, Any]:
         """Verarbeite einen WhatsApp-Export"""
@@ -235,7 +259,7 @@ class SuperSemanticProcessor:
         # Führe Analysen durch
         if semantic_msg.content:
             # 1. Marker-Erkennung
-            if self.marker_system:
+            if self.marker_system or self.custom_markers:
                 self._detect_markers(semantic_msg)
                 
             # 2. Semantic Grabber Matching
@@ -251,8 +275,20 @@ class SuperSemanticProcessor:
         """Erkenne Marker in der Nachricht"""
         try:
             # Nutze FRAUSAR zur Marker-Erkennung
-            detected = self.marker_system.analyze_text_for_markers(msg.content)
-            msg.markers = [m.get('name', '') for m in detected if m.get('name')]
+            detected = []
+            if self.marker_system:
+                detected = self.marker_system.analyze_text_for_markers(msg.content)
+                msg.markers.extend([m.get('name', '') for m in detected if m.get('name')])
+
+            # Benutzerdefinierte Marker
+            if self.custom_markers:
+                text_lower = msg.content.lower()
+                for name, patterns in self.custom_markers.items():
+                    for pattern in patterns:
+                        if pattern.lower() in text_lower:
+                            msg.markers.append(name)
+                            break
+
             logger.debug(f"🏷️ Erkannte Marker: {msg.markers}")
         except Exception as e:
             logger.error(f"Fehler bei Marker-Erkennung: {e}")

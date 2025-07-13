@@ -15,6 +15,18 @@ from typing import Optional, Dict, Any
 
 from super_semantic_processor import SuperSemanticProcessor, process_everything
 
+# Vordefinierte Marker-Sets und ihre Ordnernamen. Passen Sie die Pfade bei
+# Bedarf an Ihre lokale Marker-Struktur an.
+MARKER_SET_PATHS = {
+    "All_Markers": "ALL_NEWMARKER01",
+    "Meta_Message": "META_MESSAGE",
+    "Relationship_Patterns": "RELATIONSHIP_PATTERNS",
+    "Fraud": "FRAUD",
+    "Trauma": "TRAUMA",
+    "Love": "LOVE",
+    "Authenticy": "AUTHENTICITY",
+}
+
 # Setup Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -36,6 +48,8 @@ class SuperSemanticGUI:
         self.whatsapp_path = tk.StringVar()
         self.transcript_path = tk.StringVar()
         self.output_path = tk.StringVar(value="super_semantic_output.json")
+        self.marker_yaml = tk.StringVar()
+        self.marker_focus = tk.StringVar(value=list(MARKER_SET_PATHS.keys())[0])
         self.processing = False
         
         self._create_widgets()
@@ -111,7 +125,7 @@ class SuperSemanticGUI:
         # Optionen
         options_frame = ttk.LabelFrame(main_frame, text="⚙️ Optionen", padding="10")
         options_frame.pack(fill="x", pady=10)
-        
+
         self.use_markers = tk.BooleanVar(value=True)
         self.use_emotion = tk.BooleanVar(value=True)
         self.use_cosd = tk.BooleanVar(value=True)
@@ -129,10 +143,35 @@ class SuperSemanticGUI:
         ).pack(anchor="w")
         
         ttk.Checkbutton(
-            options_frame, 
+            options_frame,
             text="🌊 CoSD/MARSAP Drift-Analyse",
             variable=self.use_cosd
         ).pack(anchor="w")
+
+        # Analyse-Fokus
+        focus_frame = ttk.Frame(options_frame)
+        focus_frame.pack(fill="x", pady=5)
+        ttk.Label(focus_frame, text="Analyse-Fokus:").pack(side="left", padx=5)
+        focus_combo = ttk.Combobox(
+            focus_frame,
+            textvariable=self.marker_focus,
+            values=list(MARKER_SET_PATHS.keys()),
+            state="readonly",
+            width=30,
+        )
+        focus_combo.pack(side="left", padx=5)
+        focus_combo.current(0)
+
+        # Benutzerdefinierte Marker YAML
+        yaml_frame = ttk.Frame(options_frame)
+        yaml_frame.pack(fill="x", pady=5)
+        ttk.Label(yaml_frame, text="Marker YAML:").pack(side="left", padx=5)
+        ttk.Entry(yaml_frame, textvariable=self.marker_yaml, width=40).pack(side="left", padx=5)
+        ttk.Button(
+            yaml_frame,
+            text="📁 Datei wählen",
+            command=self._browse_marker_yaml
+        ).pack(side="left")
         
         # Prozess-Button
         self.process_btn = ttk.Button(
@@ -187,6 +226,15 @@ class SuperSemanticGUI:
         )
         if filename:
             self.output_path.set(filename)
+
+    def _browse_marker_yaml(self):
+        """Marker YAML-Datei auswählen"""
+        filename = filedialog.askopenfilename(
+            title="Marker YAML auswählen",
+            filetypes=[("YAML files", "*.yaml"), ("All files", "*.*")]
+        )
+        if filename:
+            self.marker_yaml.set(filename)
             
     def _log(self, message: str):
         """Füge Nachricht zum Log hinzu"""
@@ -226,7 +274,12 @@ class SuperSemanticGUI:
             self._log("🚀 Starte Super Semantic Processing...")
             
             # Erstelle Processor
-            processor = SuperSemanticProcessor()
+            yaml_path = self.marker_yaml.get() if self.use_markers.get() else None
+            focus = MARKER_SET_PATHS.get(self.marker_focus.get())
+            processor = SuperSemanticProcessor(
+                marker_yaml_path=yaml_path,
+                marker_set=focus,
+            )
             
             # Verarbeite WhatsApp wenn vorhanden
             if self.whatsapp_path.get():

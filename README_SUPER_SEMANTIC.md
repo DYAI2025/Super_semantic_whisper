@@ -159,10 +159,20 @@ relationships = [
 ## 🛠️ Erweiterte Konfiguration
 
 ### Marker anpassen
-Füge eigene Marker hinzu in:
+Lege eigene Marker in einer YAML-Datei ab und wähle sie in der GUI aus.
+Beispiel `my_markers.yaml`:
+```yaml
+markers:
+  positivity:
+    - super
+    - toll
+  doubt:
+    - vielleicht
+    - unsicher
 ```
-../ALL_SEMANTIC_MARKER_TXT/ALL_NEWMARKER01/
-```
+
+### Analyse-Fokus wählen
+In der GUI kannst du zwischen vordefinierten Marker-Sets wählen, z.B. `All_Markers` oder `Trauma`. Je nach Auswahl wird das entsprechende Marker-Verzeichnis für die Analyse genutzt.
 
 ### Semantic Grabbers erweitern
 Bearbeite:
