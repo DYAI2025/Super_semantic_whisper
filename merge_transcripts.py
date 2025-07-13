@@ -64,11 +64,35 @@ def infer_speaker(filename: str, mapping: Dict[str, str]) -> str:
 
 
 def parse_chat_line_time(line: str) -> Optional[datetime]:
-    """Extract timestamp from chat line."""
-    match = re.match(r"\[(\d{1,2}:\d{2})\]", line)
+    """Extract timestamp from chat line.
+
+    Supports WhatsApp style lines like::
+
+        [28.06.24, 14:23:15] Max: Nachricht
+
+    Returns ``None`` if no timestamp could be parsed.
+    """
+    match = re.match(
+        r"\[(\d{1,2}\.\d{1,2}\.(\d{2,4})), (\d{1,2}:\d{2})(?::(\d{2}))?\]",
+        line,
+    )
     if not match:
         return None
-    return datetime.strptime(match.group(1), "%H:%M")
+
+    day_month_year, year_part, time_part, seconds = match.group(1), match.group(2), match.group(3), match.group(4)
+    seconds = seconds or "00"
+
+    # Normalize year to 4 digits
+    if len(year_part) == 2:
+        year = int("20" + year_part)
+    else:
+        year = int(year_part)
+
+    day, month = map(int, day_month_year.split(".")[:2])
+    hour, minute = map(int, time_part.split(":"))
+    second = int(seconds)
+
+    return datetime(year, month, day, hour, minute, second)
 
 
 def merge_transcripts(chat_txt_path: Path, transcript_dir: Path, output_path: Path, settings_path: Optional[Path] = None) -> None:
@@ -93,47 +117,34 @@ def merge_transcripts(chat_txt_path: Path, transcript_dir: Path, output_path: Pa
                 speaker_mapping = data.get("speaker_mapping", {})
 
     transcripts: List[Dict[str, any]] = []
-    for file in sorted(transcript_dir.glob("*.txt")):
+    for file in transcript_dir.glob("*.txt"):
         ts = parse_transcript_timestamp(file.name)
         if ts:
             transcripts.append({"path": file, "timestamp": ts})
 
-    transcripts.sort(key=lambda x: x["timestamp"])
-
     with open(chat_txt_path, "r", encoding="utf-8") as f:
-        chat_lines = f.read().splitlines()
+        chat_lines = [line.rstrip("\n") for line in f]
+
+    events: List[Dict[str, any]] = []
+    for line in chat_lines:
+        events.append({"type": "chat", "timestamp": parse_chat_line_time(line), "line": line})
+
+    for tr in transcripts:
+        events.append({"type": "transcript", **tr})
+
+    events.sort(key=lambda e: (e.get("timestamp") or datetime.min, 0 if e["type"] == "chat" else 1))
 
     result_lines: List[str] = []
-    idx = 0
-
-    for line in chat_lines:
-        result_lines.append(line)
-        line_time = parse_chat_line_time(line)
-        if line_time:
-            while idx < len(transcripts):
-                transcript = transcripts[idx]
-                # align date of transcript timestamp with arbitrary date of chat time
-                t_time = transcript["timestamp"].replace(year=line_time.year, month=line_time.month, day=line_time.day)
-                if abs((t_time - line_time).total_seconds()) <= 60:
-                    speaker = infer_speaker(transcript["path"].name, speaker_mapping)
-                    result_lines.append(f"[Sprecher: {speaker} | Audio: {t_time.strftime('%H:%M')}]")
-                    with open(transcript["path"], "r", encoding="utf-8") as tf:
-                        text = tf.read().strip()
-                        if text:
-                            result_lines.extend(text.splitlines())
-                    idx += 1
-                else:
-                    break
-
-    # Append remaining transcripts at end
-    for j in range(idx, len(transcripts)):
-        transcript = transcripts[j]
-        speaker = infer_speaker(transcript["path"].name, speaker_mapping)
-        result_lines.append(f"[Sprecher: {speaker} | Audio: {transcript['timestamp'].strftime('%H:%M')}]")
-        with open(transcript["path"], "r", encoding="utf-8") as tf:
-            text = tf.read().strip()
-            if text:
-                result_lines.extend(text.splitlines())
+    for ev in events:
+        if ev["type"] == "chat":
+            result_lines.append(ev["line"])
+        else:
+            speaker = infer_speaker(ev["path"].name, speaker_mapping)
+            result_lines.append(f"[Sprecher: {speaker} | Audio: {ev['timestamp'].strftime('%H:%M')}]")
+            with open(ev["path"], "r", encoding="utf-8") as tf:
+                text = tf.read().strip()
+                if text:
+                    result_lines.extend(text.splitlines())
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write("\n".join(result_lines))
