@@ -1,0 +1,4 @@
+# Example configuration template
+watch_directory: /path/to/watch
+output_directory: /path/to/output
+log_directory: /path/to/logs
