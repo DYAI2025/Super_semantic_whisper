@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+wordthread-ui/node_modules/
+*.log
+
+# Misc
+.DS_Store
