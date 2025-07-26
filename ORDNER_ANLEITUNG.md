@@ -7,12 +7,12 @@ Die OPUS-Dateien (WhatsApp Audio) gehören in den **`Eingang/`** Ordner, organis
 ```
 whisper_speaker_matcher/
 └── Eingang/
-    ├── Zoe/                      ← Audio-Dateien von/zu Zoe
-    ├── Christoph_Schröter/       ← Audio-Dateien von/zu Christoph
-    ├── Freddy/                   ← Audio-Dateien von/zu Freddy
-    ├── Marike/                   ← Audio-Dateien von/zu Marike
-    ├── Vincent/                  ← Audio-Dateien von/zu Vincent
-    └── Elke_Christina_Poersch/   ← Audio-Dateien von/zu Elke
+    ├──  name#1/                      ← Audio-Dateien von/ name#
+    ├──  name#2/       ← Audio-Dateien von/zu  name#
+    ├──  name#3/                   ← Audio-Dateien von/ name#
+    ├── name#4/                   ← Audio-Dateien von/ name#
+    ├── name#5/                  ← Audio-Dateien von/ name#
+    └── name#6/   ← Audio-Dateien von/zu  name#
 ```
 
 ## 📱 WhatsApp Audio-Dateien Beispiele
@@ -31,19 +31,19 @@ Typische WhatsApp Audio-Dateinamen:
 
 ### Input:
 ```
-Eingang/Zoe/WhatsApp Audio 2025-06-29 at 13.20.58.opus
+Eingang/name#/WhatsApp Audio 2025-06-29 at 13.20.58.opus
 ```
 
 ### Output:
 ```
-Transkripte_LLM/2025-06-29_13-20-58_Zoe_WhatsApp Audio 2025-06-29 at 13.20.58_transkript.md
+Transkripte_LLM/2025-06-29_13-20-58_ name#_WhatsApp Audio 2025-06-29 at 13.20.58_transkript.md
 ```
 
 ### Inhalt des Transkripts:
 ```markdown
 # WhatsApp Audio Transkription
 
-**Chat mit:** Zoe
+**Chat mit:**  name#1
 **Aufnahme am:** 29.06.2025 um 13:20:58
 **Verarbeitet am:** 03.07.2025 um 12:30:15
 **Original-Datei:** WhatsApp Audio 2025-06-29 at 13.20.58.opus
@@ -55,16 +55,16 @@ Transkripte_LLM/2025-06-29_13-20-58_Zoe_WhatsApp Audio 2025-06-29 at 13.20.58_tr
 
 ## Transkription:
 
-**[Zoe - 13:20:58]:** Hey, ich wollte dir nur sagen, dass...
+**[ name#1 - 13:20:58]:** Hey, ich wollte dir nur sagen, dass...
 
 ## Kontext für LLM:
-Diese Nachricht wurde am 29.06.2025 um 13:20:58 in einem WhatsApp-Chat zwischen mir und Zoe aufgenommen.
+Diese Nachricht wurde am 29.06.2025 um 13:20:58 in einem WhatsApp-Chat zwischen mir und  name#1 aufgenommen.
 ```
 
 ## 🚀 So startest du die Verarbeitung:
 
 ```bash
-cd /Users/benjaminpoersch/claude/whisper_speaker_matcher
+cd /Users/yourname/foldertoyoure/whisper_speaker_matcher
 
 # V3 System mit Datum/Zeit-Extraktion (Empfohlen!)
 python3 auto_transcriber_v3.py --local
