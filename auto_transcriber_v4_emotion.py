@@ -21,6 +21,14 @@ from datetime import datetime
 import shutil
 from typing import List, Dict, Tuple, Optional
 
+# Sprecherdiarisierung importieren
+try:
+    from speaker_diarizer import SpeakerDiarizer, create_diarizer, SpeakerSegment
+    DIARIZER_AVAILABLE = True
+except ImportError:
+    DIARIZER_AVAILABLE = False
+    print("Speaker Diarizer nicht verfügbar.")
+
 # Versuche zusätzliche Audio-Bibliotheken zu importieren
 try:
     import librosa
@@ -273,6 +281,15 @@ class WhisperSpeakerMatcherV4:
         self.use_faster_whisper = use_faster_whisper
         self.speakers = self._load_speaker_profiles()
         self.emotion_analyzer = EmotionalAnalyzer()
+
+        # Sprecherdiarisierung initialisieren
+        self.diarizer = None
+        if DIARIZER_AVAILABLE:
+            self.diarizer = create_diarizer()
+            if self.diarizer:
+                logger.info("Sprecherdiarisierung aktiviert")
+            else:
+                logger.warning("Sprecherdiarisierung nicht verfügbar (HF_TOKEN fehlt?)")
         
     def _create_local_structure(self):
         """Erstelle lokale Verzeichnisstruktur wenn Google Drive nicht verfügbar"""
@@ -401,6 +418,74 @@ class WhisperSpeakerMatcherV4:
             logger.error(f"Transkriptions-Fehler für {audio_path}: {e}")
             return None
 
+    def transcribe_with_diarization(self, audio_path: Path) -> Tuple[str, List[Dict]]:
+        """
+        Transkribiere mit Sprechertrennung.
+
+        Returns:
+            Tuple von (vollständiger Text, Liste von Segmenten mit Sprecher)
+        """
+        # 1. Standard-Transkription
+        transcription = self.transcribe_audio_standard(audio_path)
+
+        if not transcription:
+            return "", []
+
+        # 2. Wenn kein Diarizer verfügbar, Fallback
+        if not self.diarizer:
+            return transcription, [{
+                "speaker": "unbekannt",
+                "role": "unbekannt",
+                "text": transcription,
+                "start": 0.0,
+                "end": 0.0
+            }]
+
+        # 3. Diarisierung durchführen
+        try:
+            segments = self.diarizer.diarize(audio_path)
+            segments = self.diarizer.assign_roles(segments, first_speaker_is_therapist=True)
+
+            # Einfache Zuordnung: Verteile Text proportional auf Segmente
+            # (Für bessere Ergebnisse: Whisper word_timestamps nutzen)
+            words = transcription.split()
+            total_duration = sum(s.end - s.start for s in segments)
+
+            if total_duration > 0 and segments:
+                word_idx = 0
+                for seg in segments:
+                    seg_duration = seg.end - seg.start
+                    seg_word_count = int(len(words) * (seg_duration / total_duration))
+                    seg.text = " ".join(words[word_idx:word_idx + seg_word_count])
+                    word_idx += seg_word_count
+
+                # Restliche Wörter zum letzten Segment
+                if word_idx < len(words):
+                    segments[-1].text += " " + " ".join(words[word_idx:])
+
+            # Konvertiere zu Dict-Liste
+            result_segments = []
+            for seg in segments:
+                result_segments.append({
+                    "speaker": seg.speaker,
+                    "role": seg.role or "unbekannt",
+                    "text": seg.text or "",
+                    "start": seg.start,
+                    "end": seg.end
+                })
+
+            return transcription, result_segments
+
+        except Exception as e:
+            logger.error(f"Diarisierung fehlgeschlagen: {e}")
+            return transcription, [{
+                "speaker": "unbekannt",
+                "role": "unbekannt",
+                "text": transcription,
+                "start": 0.0,
+                "end": 0.0
+            }]
+
     def _find_whisper_command(self):
         """Finde verfügbare Whisper-Installation"""
         possible_commands = ['whisper', 'python -m whisper', 'python3 -m whisper']
@@ -485,7 +570,63 @@ Die Sprachanalyse zeigt {emotion_analysis.get('dominant_emotion', 'neutrale')} e
 """
         
         return output
-    
+
+    def format_with_diarization(self, chatpartner: str, diarized_segments: List[Dict],
+                                audio_file: Path, recording_datetime: Optional[datetime],
+                                processing_time: datetime, emotion_analysis: Dict,
+                                speaker_stats: Dict) -> str:
+        """Formatiere Transkription mit echter Sprechertrennung"""
+
+        if recording_datetime:
+            recording_str = recording_datetime.strftime('%d.%m.%Y um %H:%M:%S')
+        else:
+            recording_str = "Unbekannt"
+
+        emotion_summary = self._format_emotion_summary(emotion_analysis)
+
+        # Sprecher-Statistiken formatieren
+        stats_str = ""
+        for role, data in speaker_stats.items():
+            stats_str += f"\n- **{role.title()}:** {data.get('speaking_time', 0):.1f}s ({data.get('speaking_percentage', 0)}%), {data.get('turn_count', 0)} Redebeiträge"
+
+        output = f"""# Therapiesitzung Transkription
+
+**Chat mit:** {chatpartner}
+**Aufnahme am:** {recording_str}
+**Verarbeitet am:** {processing_time.strftime('%d.%m.%Y um %H:%M:%S')}
+**Original-Datei:** {audio_file.name}
+
+## Sprecher-Analyse
+{stats_str}
+
+## Emotionale Analyse:
+{emotion_summary}
+
+## Transkription mit Sprechertrennung:
+
+"""
+
+        # Segmente mit Sprechern ausgeben
+        for seg in diarized_segments:
+            role = seg.get("role", "unbekannt").title()
+            text = seg.get("text", "").strip()
+            start = seg.get("start", 0)
+
+            if text:
+                # Emotionaler Marker für dieses Segment
+                seg_emotion = self.emotion_analyzer.analyze_text_emotion(text)
+                emotion_marker = self._get_emotion_marker_for_text(text, seg_emotion)
+
+                timestamp = f"{int(start // 60):02d}:{int(start % 60):02d}"
+                output += f"**[{role} - {timestamp}]{emotion_marker}:** {text}\n\n"
+
+        output += f"""---
+*Transkribiert mit WhisperSprecherMatcher V4 + Pyannote Diarisierung*
+*{processing_time.strftime('%d.%m.%Y um %H:%M:%S')}*
+"""
+
+        return output
+
     def _format_emotion_summary(self, emotion_analysis: Dict) -> str:
         """Formatiere emotionale Analyse für das Transkript"""
         dominant = emotion_analysis.get('dominant_emotion', 'neutral')
@@ -607,45 +748,66 @@ Die Sprachanalyse zeigt {emotion_analysis.get('dominant_emotion', 'neutrale')} e
                 else:
                     logger.info(f"Verarbeite: {audio_file.name} (Chat mit {chatpartner})")
                 
-                # 1. Audio transkribieren
-                transcription = self.transcribe_audio_standard(audio_file)
-                
+                # 1. Audio transkribieren MIT Sprechertrennung
+                if self.diarizer:
+                    logger.info("🎯 Transkribiere mit Sprecherdiarisierung...")
+                    transcription, diarized_segments = self.transcribe_with_diarization(audio_file)
+                else:
+                    transcription = self.transcribe_audio_standard(audio_file)
+                    diarized_segments = []
+
                 if not transcription:
                     logger.warning(f"Keine Transkription erhalten für {audio_file.name}")
                     continue
-                
+
                 # 2. Emotionale Analyse
                 logger.info(f"🎭 Analysiere emotionale Sprachfärbung...")
-                
+
                 # Audio-Features analysieren
                 audio_features = self.emotion_analyzer.analyze_audio_features(audio_file)
-                
+
                 # Text-Emotion analysieren
                 text_emotion = self.emotion_analyzer.analyze_text_emotion(transcription)
-                
+
                 # Audio-Emotion klassifizieren
                 audio_emotion = self.emotion_analyzer.classify_emotion_from_audio(audio_features)
-                
+
                 # Kombiniere beide Analysen
                 emotion_analysis = {
-                    'dominant_emotion': text_emotion['dominant_emotion'],  # Priorität auf Text
+                    'dominant_emotion': text_emotion['dominant_emotion'],
                     'audio_emotion': audio_emotion,
                     'emotion_scores': text_emotion['emotion_scores'],
                     'valence': text_emotion['valence'],
                     'arousal': text_emotion['arousal'],
                     'audio_features': audio_features
                 }
-                
+
                 logger.info(f"🎭 Emotionale Färbung: {emotion_analysis['dominant_emotion']} (Valenz: {emotion_analysis['valence']:.2f})")
-                
-                # 3. Sprecher identifizieren
-                conversation_parts = self.identify_speaker_in_conversation(transcription, chatpartner)
-                
-                # 4. Formatiere für LLM mit emotionaler Analyse
+
+                # 3. Formatiere Output
                 processing_time = datetime.now()
-                llm_formatted = self.format_for_llm_with_emotion(chatpartner, conversation_parts, 
-                                                               audio_file, recording_datetime, 
-                                                               processing_time, emotion_analysis)
+
+                if diarized_segments and self.diarizer:
+                    # MIT Sprechertrennung
+                    speaker_stats = self.diarizer.get_speaker_statistics(
+                        [SpeakerSegment(**{k: v for k, v in seg.items() if k in ['start', 'end', 'speaker', 'role', 'text']})
+                         for seg in diarized_segments]
+                    ) if DIARIZER_AVAILABLE else {}
+
+                    llm_formatted = self.format_with_diarization(
+                        chatpartner, diarized_segments,
+                        audio_file, recording_datetime,
+                        processing_time, emotion_analysis, speaker_stats
+                    )
+                    logger.info(f"✅ Sprechertrennung: {len(set(s['role'] for s in diarized_segments))} Sprecher erkannt")
+                else:
+                    # Fallback ohne Sprechertrennung
+                    conversation_parts = self.identify_speaker_in_conversation(transcription, chatpartner)
+                    llm_formatted = self.format_for_llm_with_emotion(
+                        chatpartner, conversation_parts,
+                        audio_file, recording_datetime,
+                        processing_time, emotion_analysis
+                    )
                 
                 # 5. Speichere Transkript
                 with open(output_path, 'w', encoding='utf-8') as f:
