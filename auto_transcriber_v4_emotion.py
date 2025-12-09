@@ -21,6 +21,10 @@ from datetime import datetime
 import shutil
 from typing import List, Dict, Tuple, Optional
 
+# Import ConfigManager
+sys.path.insert(0, str(Path(__file__).parent))
+from src.config_manager import ConfigManager
+
 # Versuche zusätzliche Audio-Bibliotheken zu importieren
 try:
     import librosa
@@ -250,35 +254,53 @@ class EmotionalAnalyzer:
             return 'hoffnungsvoll_antreibend'
 
 class WhisperSpeakerMatcherV4:
-    def __init__(self, base_path=None, use_faster_whisper=True):
-        if base_path is None:
-            self.base_path = Path("/Users/benjaminpoersch/Library/CloudStorage/GoogleDrive-benjamin.poersch@diyrigent.de/Meine Ablage/MyMind/WhisperSprecherMatcher")
-        else:
+    def __init__(self, base_path=None, config_path=None, use_faster_whisper=True):
+        """
+        Initialisiert den WhisperSpeakerMatcher mit konfigurierbaren Pfaden
+
+        Args:
+            base_path: Expliziter Basis-Pfad (überschreibt Config) - für Abwärtskompatibilität
+            config_path: Pfad zur config.yaml (optional)
+            use_faster_whisper: Nutze faster-whisper statt standard whisper
+        """
+        # Lade Konfiguration
+        self.config = ConfigManager(config_path)
+
+        # Pfade aus Config oder Argument (Argument hat Priorität für Abwärtskompatibilität)
+        if base_path:
+            # Expliziter Pfad wurde übergeben (Legacy-Mode)
+            logger.info(f"💡 Nutze expliziten Basis-Pfad: {base_path}")
             self.base_path = Path(base_path)
-            
-        self.eingang_path = self.base_path / "Eingang"
-        self.memory_path = self.base_path / "Memory"
-        self.output_path = self.base_path / "Transkripte_LLM"
-        self.output_path.mkdir(parents=True, exist_ok=True)
-        
-        # Fallback für lokale Entwicklung
-        if not self.base_path.exists():
-            logger.warning(f"Google Drive Pfad nicht verfügbar: {self.base_path}")
-            self.base_path = Path("./whisper_speaker_matcher")
             self.eingang_path = self.base_path / "Eingang"
             self.memory_path = self.base_path / "Memory"
             self.output_path = self.base_path / "Transkripte_LLM"
-            self._create_local_structure()
-        
+        else:
+            # Nutze ConfigManager (empfohlener Weg)
+            logger.info("⚙️  Nutze ConfigManager für Pfadverwaltung")
+            self.base_path = self.config.get_path('base')
+            self.eingang_path = self.config.get_path('eingang')
+            self.memory_path = self.config.get_path('memory')
+            self.output_path = self.config.get_path('output')
+
+        # Erstelle Verzeichnisse falls nicht vorhanden
+        self._ensure_directories()
+
+        # Logging der finalen Pfade
+        logger.info(f"📁 Basis-Pfad: {self.base_path}")
+        logger.info(f"📂 Eingang: {self.eingang_path}")
+        logger.info(f"🧠 Memory: {self.memory_path}")
+        logger.info(f"📝 Output: {self.output_path}")
+
         self.use_faster_whisper = use_faster_whisper
         self.speakers = self._load_speaker_profiles()
         self.emotion_analyzer = EmotionalAnalyzer()
-        
-    def _create_local_structure(self):
-        """Erstelle lokale Verzeichnisstruktur wenn Google Drive nicht verfügbar"""
+
+    def _ensure_directories(self):
+        """Erstelle notwendige Verzeichnisse"""
         for path in [self.eingang_path, self.memory_path, self.output_path]:
             path.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Lokale Struktur erstellt: {self.base_path}")
+            logger.debug(f"✓ Verzeichnis erstellt/geprüft: {path}")
+        
     
     def _load_speaker_profiles(self):
         """Lade bekannte Sprecher-Profile aus Memory-Ordner"""
@@ -667,26 +689,81 @@ def main():
     """Hauptfunktion"""
     print("🎤🎭 WhisperSprecherMatcher V4 mit emotionaler Analyse gestartet...")
     print("Mit Datum/Zeit-Extraktion und emotionaler Sprachfärbung")
-    
+    print()
+
     import argparse
-    parser = argparse.ArgumentParser(description="WhisperSprecherMatcher V4 (Emotion)")
-    parser.add_argument("--local", action="store_true", help="Verwende lokalen Pfad")
-    
+    import warnings
+
+    parser = argparse.ArgumentParser(
+        description="WhisperSprecherMatcher V4 (Emotion)",
+        epilog="Siehe docs/KONFIGURATION.md für Details zur Pfad-Konfiguration"
+    )
+    parser.add_argument(
+        "--local",
+        action="store_true",
+        help="Verwende lokalen Pfad (DEPRECATED: Nutze --base-path oder config.yaml)"
+    )
+    parser.add_argument(
+        "--base-path",
+        type=str,
+        help="Expliziter Basis-Pfad (überschreibt config.yaml)"
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        help="Pfad zur config.yaml (default: config.yaml → config/default_config.yaml)"
+    )
+    parser.add_argument(
+        "--show-config",
+        action="store_true",
+        help="Zeige effektive Konfiguration und beende"
+    )
+
     args = parser.parse_args()
-    
+
     try:
+        # Zeige Konfiguration und beende
+        if args.show_config:
+            config = ConfigManager(Path(args.config) if args.config else None)
+            config.show_effective_config()
+            return
+
+        # Abwärtskompatibilität: --local
         if args.local:
-            matcher = WhisperSpeakerMatcherV4(base_path=".")
+            warnings.warn(
+                "--local ist deprecated. Nutze stattdessen:\n"
+                "  --base-path .  ODER\n"
+                "  config.yaml mit paths.base_path: .",
+                DeprecationWarning,
+                stacklevel=2
+            )
+            matcher = WhisperSpeakerMatcherV4(
+                base_path=".",
+                config_path=Path(args.config) if args.config else None
+            )
+        # Expliziter Basis-Pfad
+        elif args.base_path:
+            matcher = WhisperSpeakerMatcherV4(
+                base_path=args.base_path,
+                config_path=Path(args.config) if args.config else None
+            )
+        # Standard: Nutze ConfigManager
         else:
-            matcher = WhisperSpeakerMatcherV4()
-        
+            matcher = WhisperSpeakerMatcherV4(
+                config_path=Path(args.config) if args.config else None
+            )
+
+        print()
         matcher.process_audio_files()
+        print()
         print("✅ Verarbeitung erfolgreich abgeschlossen!")
         print(f"📁 Transkripte mit emotionaler Analyse gespeichert in: {matcher.output_path}")
-        
+
     except Exception as e:
         logger.error(f"Kritischer Fehler: {e}")
         print(f"❌ Fehler: {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
 
 if __name__ == "__main__":
