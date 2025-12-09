@@ -1,0 +1,52 @@
+# Super Semantic Whisper - Zentrale Konfiguration
+# Diese Datei enthält alle Standardwerte
+
+paths:
+  # Basis-Pfad (wird erweitert um Unterordner)
+  # null = auto-detect (Google Drive → Lokaler Fallback)
+  base_path: null
+
+  # Explizite Pfade (überschreiben base_path)
+  eingang: null
+  memory: null
+  output: null
+
+  # Google Drive Konfiguration
+  google_drive:
+    enabled: false
+    base_path: null  # z.B. /Users/name/GoogleDrive/WhisperSprecherMatcher
+    timeout_seconds: 5
+
+  # Lokale Fallback-Pfade
+  local_fallback:
+    enabled: true
+    base_path: "./whisper_speaker_matcher"
+
+audio:
+  # Whisper Modell (tiny, base, small, medium, large)
+  whisper_model: "base"
+  language: "de"
+
+  # Unterstützte Audio-Formate
+  supported_formats:
+    - .opus
+    - .wav
+    - .mp3
+    - .m4a
+    - .ogg
+
+emotional_analysis:
+  enabled: true
+  use_librosa: true
+  use_textblob: true
+
+  # Externe Marker-Systeme (optional)
+  external_markers:
+    frausar_path: null  # Pfad zu ../Marker_assist_bot/
+    marsap_path: null   # Pfad zu ../MARSAP/
+    all_markers_path: null  # Pfad zu ../ALL_SEMANTIC_MARKER_TXT/
+
+logging:
+  level: INFO
+  file: "transcription.log"
+  format: "%(asctime)s - %(levelname)s - %(message)s"
